@@ -2,7 +2,7 @@ name: astrbot_plugin_auto_diary
 display_name: 自动日记本
 desc: 把和 AI 的对话自动整理成日记。聊完安静一段时间后，模型会以第一人称把这段对话写成一篇日记，存进本地 SQLite，一天一篇。
 author: 枫
-version: 1.9.7
+version: 1.9.8
 repo: https://github.com/feng20010612-glitch/astrbot_plugin_auto_diary
 short_desc: 对话自动整理成日记
 astrbot_version: ">=4.16"

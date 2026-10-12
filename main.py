@@ -158,14 +158,53 @@ class DiaryDatabase:
         clause = " AND ".join("instr(',' || tags || ',', ?) > 0" for _ in wanted)
         return clause, [f",{tag}," for tag in wanted]
 
-    def read_today(self, tags) -> str:
+    @staticmethod
+    def _line_prefix(tags) -> str:
+        """取会话／平台标签的公共前缀。
+
+        旧版本把会话标识硬截断到 48 字符，新版本改成「前缀＋指纹」，
+        同一个会话前后算出来的标签不一样，会被当成两条线。这个前缀能把它们认成同一条。
+        """
+        for tag in tags or []:
+            for head in ("sess:", "plat:"):
+                if tag.startswith(head):
+                    value = tag[len(head) :]
+                    if "_" in value:
+                        return f"{head}{value.rsplit('_', 1)[0]}"
+                    return tag
+        return ""
+
+    def _find_id(self, conn, day: str, tags) -> int | None:
+        """找当天这一条：先精确匹配，找不到再按前缀兼容旧标签。"""
         clause, params = self._tag_clause(tags)
+        row = conn.execute(
+            "SELECT id FROM entries WHERE date = ? AND deleted = 0 "
+            f"AND {clause} ORDER BY id LIMIT 1",
+            [day, *params],
+        ).fetchone()
+        if row:
+            return row["id"]
+
+        prefix = self._line_prefix(tags)
+        if not prefix:
+            return None
+        fixed = [x for x in (tags or []) if not x.startswith(("sess:", "plat:"))]
+        clause2, params2 = self._tag_clause(fixed)
+        row = conn.execute(
+            "SELECT id FROM entries WHERE date = ? AND deleted = 0 "
+            f"AND {clause2} AND instr(tags, ?) > 0 ORDER BY id LIMIT 1",
+            [day, *params2, prefix],
+        ).fetchone()
+        return row["id"] if row else None
+
+    def read_today(self, tags) -> str:
         conn = self.connect()
         try:
+            entry_id = self._find_id(conn, date.today().isoformat(), tags)
+            if entry_id is None:
+                return ""
             row = conn.execute(
-                "SELECT content FROM entries WHERE date = ? AND deleted = 0 "
-                f"AND {clause} ORDER BY id LIMIT 1",
-                [date.today().isoformat(), *params],
+                "SELECT content FROM entries WHERE id = ?", (entry_id,)
             ).fetchone()
             return row["content"] if row else ""
         finally:
@@ -468,19 +507,15 @@ class DiaryDatabase:
     def save_today(self, text: str, title: str, tags) -> None:
         """当天（同一组标签下）有则更新，没有则新建——一天一人设一篇。"""
         tag_string = ",".join(t for t in (tags or []) if t) or DEFAULT_TAG
-        clause, params = self._tag_clause(tags)
         conn = self.connect()
         try:
-            row = conn.execute(
-                "SELECT id FROM entries WHERE date = ? AND deleted = 0 "
-                f"AND {clause} ORDER BY id LIMIT 1",
-                [date.today().isoformat(), *params],
-            ).fetchone()
-            if row:
+            entry_id = self._find_id(conn, date.today().isoformat(), tags)
+            if entry_id is not None:
+                # 顺手把标签规范成当前格式，免得这次认出来、下次又认不出
                 conn.execute(
-                    "UPDATE entries SET content = ?, title = ?, "
+                    "UPDATE entries SET content = ?, title = ?, tags = ?, "
                     "updated_at = datetime('now', 'localtime') WHERE id = ?",
-                    (text, title, row["id"]),
+                    (text, title, tag_string, entry_id),
                 )
             else:
                 conn.execute(
