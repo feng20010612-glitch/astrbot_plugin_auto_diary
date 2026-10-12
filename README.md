@@ -1,5 +1,7 @@
 # 自动日记本 · astrbot_plugin_auto_diary
 
+> 仓库：https://github.com/feng20010612-glitch/astrbot_plugin_auto_diary
+
 把和 AI 的对话，自动整理成日记。
 
 聊完安静一段时间后，插件会调用当前使用的模型，把这段对话以**第一人称**写成一篇日记，存在本地 SQLite 里。一天一篇，越写越完整，不是流水账。
