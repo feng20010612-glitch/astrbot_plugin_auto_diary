@@ -1,5 +1,10 @@
 # 更新日志
 
+## 1.9.5
+
+- 配置说明里补上具体例子（`mode` 的时间戳长相、`idle_minutes` 设太短会怎样）
+- README 新增「两种写法长什么样」：`append` 与 `merge` 的实际输出对比
+
 ## 1.9.4
 
 - 把各配置项的说明写透（`mode` 的追加分段／整合成一篇、`scope`、`idle_minutes`、`title_template`、`persona`、`db_path`），不再把选项挤在一句话里
