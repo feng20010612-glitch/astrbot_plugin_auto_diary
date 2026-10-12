@@ -5,6 +5,7 @@ backups/
 *.db
 *.sqlite*
 prefs.json
+pending.json
 debug.log
 .vscode/
 .idea/

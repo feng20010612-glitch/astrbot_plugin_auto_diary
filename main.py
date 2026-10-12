@@ -528,12 +528,19 @@ class Main(Star):
         self._lock = asyncio.Lock()
 
         self._register_web_api()
+        self._load_pending()
         self._sync_titles()
         self._purge_trash()
         logger.info(
             f"[AutoDiary] 已加载 | 数据库：{self.db_path} | "
             f"记录范围：{self.scope} | 安静 {self.idle_minutes} 分钟后整理"
         )
+        self._debug(
+            f"===== 插件已加载 ===== 分组={self.group_by} | 写法={self.mode} | "
+            f"范围={self.scope} | 安静={self.idle_minutes}分钟 | 回收站={self.trash_days}天"
+        )
+        if any(self._queues.values()):
+            self._ensure_worker()
 
     # ------------------------------------------------------------------ 生命周期
     async def terminate(self) -> None:
@@ -627,6 +634,7 @@ class Main(Star):
         if len(queue) > MAX_PENDING_ROUNDS:
             self._queues[key] = queue[-MAX_PENDING_ROUNDS:]
         self._last_activity[key] = time.time()
+        self._save_pending()
 
     def _ensure_worker(self) -> None:
         if self._task and not self._task.done():
@@ -718,6 +726,7 @@ class Main(Star):
                 self._debug(f"生成日记失败：{exc!r}")
             finally:
                 self._writing.discard(key)
+                self._save_pending()
 
     @staticmethod
     def _pick_persona_fields(persona) -> tuple[str, str]:
@@ -900,6 +909,55 @@ class Main(Star):
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[AutoDiary] 清理回收站失败：{exc}")
             return 0
+
+    def _pending_path(self) -> Path:
+        return Path(self.db_path).parent / "pending.json"
+
+    def _save_pending(self) -> None:
+        """把还没落笔的对话存到磁盘，免得重载/重启把它吃掉。"""
+        try:
+            data = {
+                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "queues": {k: v for k, v in self._queues.items() if v},
+                "sources": {k: list(v) for k, v in self._sources.items()},
+                "activity": self._last_activity,
+            }
+            self._pending_path().write_text(
+                json.dumps(data, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[AutoDiary] 暂存待写内容失败：{exc}")
+
+    def _load_pending(self) -> None:
+        """插件重新加载时，把上次没写完的接回来。"""
+        try:
+            path = self._pending_path()
+            if not path.exists():
+                return
+            data = json.loads(path.read_text(encoding="utf-8")) or {}
+            queues = data.get("queues") or {}
+            if isinstance(queues, dict):
+                self._queues = {
+                    str(k): [str(x) for x in v] for k, v in queues.items() if v
+                }
+            sources = data.get("sources") or {}
+            if isinstance(sources, dict):
+                self._sources = {
+                    str(k): (str(v[0]), str(v[1]))
+                    for k, v in sources.items()
+                    if isinstance(v, (list, tuple)) and len(v) >= 2
+                }
+            activity = data.get("activity") or {}
+            if isinstance(activity, dict):
+                self._last_activity = {
+                    str(k): float(v) for k, v in activity.items()
+                }
+            total = sum(len(v) for v in self._queues.values())
+            if total:
+                logger.info(f"[AutoDiary] 接回上次没写完的 {total} 轮对话")
+                self._debug(f"接回上次没写完的 {total} 轮对话（来自 {data.get('saved_at')}）")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[AutoDiary] 读取暂存内容失败：{exc}")
 
     def _debug(self, message: str) -> None:
         """往插件目录写一行调试日志，出问题时好查。"""
