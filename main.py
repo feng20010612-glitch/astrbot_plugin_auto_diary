@@ -170,6 +170,25 @@ class DiaryDatabase:
         finally:
             conn.close()
 
+    def entries_by_date(self, day: str, tags) -> list[dict]:
+        """某一天的全部日记。
+
+        分组打开时同一天会有好几条（每条会话线各一条），
+        只看第一条会让人以为「日记没更新」。
+        """
+        clause, params = self._tag_clause(tags)
+        conn = self.connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, date, title, content, tags, updated_at FROM entries "
+                "WHERE date = ? AND deleted = 0 "
+                f"AND {clause} ORDER BY id",
+                [day, *params],
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     def read_by_date(self, day: str, tags) -> str:
         clause, params = self._tag_clause(tags)
         conn = self.connect()
@@ -365,6 +384,17 @@ class DiaryDatabase:
             return ids
         finally:
             conn.close()
+
+    def delete_ids(self, ids: list[int], tags) -> list[int]:
+        """按 id 软删除（只删本插件范围内的）。"""
+        wanted = [int(i) for i in (ids or [])]
+        if not wanted:
+            return []
+        clause, params = self._tag_clause(tags)
+        placeholders = ",".join("?" for _ in wanted)
+        return self._soft_delete(
+            f"id IN ({placeholders}) AND {clause}", [*wanted, *params]
+        )
 
     def delete_day(self, day: str, tags) -> list[int]:
         """软删除某一天的日记，返回被删的 id 列表。"""
@@ -650,20 +680,30 @@ class Main(Star):
                 existing = self.db.read_today(tags)
                 # append：每次都追加，带时间戳，一条不丢
                 # merge ：把旧内容和新对话交给模型，重写成一篇连贯日记
+                self._debug(
+                    f"本次对话 {len(convo)} 字，开头：{convo[:40]!r}"
+                )
                 if self.mode == "append":
                     piece = await self._compose(convo, "", system_prompt, umo)
-                    if piece:
-                        stamp = time.strftime("%H:%M")
-                        merged = (
-                            f"{existing.rstrip()}\n\n〔{stamp}〕\n{piece}".strip()
-                            if existing
-                            else f"〔{stamp}〕\n{piece}"
-                        )
-                        self.db.save_today(merged, title, tags)
-                        logger.info(
-                            f"[AutoDiary] {persona_name or '默认人设'} 追加了一段："
-                            f"{piece[:30]}…"
-                        )
+                    if not piece:
+                        self._debug("模型没返回内容，这次不写")
+                        return
+                    # 同一段内容已经记过就别再写一遍，免得日记里出现两段一模一样的
+                    if piece.strip() and piece.strip() in existing:
+                        self._debug("这段内容和日记里已有的重复，跳过")
+                        return
+                    stamp = time.strftime("%H:%M")
+                    merged = (
+                        f"{existing.rstrip()}\n\n〔{stamp}〕\n{piece}".strip()
+                        if existing
+                        else f"〔{stamp}〕\n{piece}"
+                    )
+                    self.db.save_today(merged, title, tags)
+                    self._debug(f"写入完成 | 追加 {len(piece)} 字 | 全文 {len(merged)} 字")
+                    logger.info(
+                        f"[AutoDiary] {persona_name or '默认人设'} 追加了一段："
+                        f"{piece[:30]}…"
+                    )
                 else:
                     text = await self._compose(convo, existing, system_prompt, umo)
                     self._debug(f"模型返回 {len(text or '')} 字")
@@ -979,8 +1019,18 @@ class Main(Star):
         """GET /entry?date=YYYY-MM-DD"""
         try:
             day = self._arg("date") or date.today().isoformat()
-            entry = self.db.get_entry(day, self.base_tags)
-            return jsonify({"ok": True, "data": entry})
+            entries = self.db.entries_by_date(day, self.base_tags)
+            return jsonify(
+                {
+                    "ok": True,
+                    "data": {
+                        "date": day,
+                        "count": len(entries),
+                        "entry": entries[0] if entries else None,  # 兼容旧行为
+                        "entries": entries,
+                    },
+                }
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[AutoDiary] entry 接口出错")
             return jsonify({"ok": False, "error": str(exc)}), 500
@@ -1009,9 +1059,13 @@ class Main(Star):
             return jsonify({"ok": False, "error": str(exc)}), 500
 
     async def _api_delete(self):
-        """POST /delete   body: {"date": "YYYY-MM-DD"} 或 {"all": true}"""
+        """POST /delete   body: {"id": 12} / {"date": "YYYY-MM-DD"} / {"all": true}"""
         try:
             payload = await self._payload()
+            if payload.get("id") is not None:
+                ids = self.db.delete_ids([payload["id"]], self.base_tags)
+                logger.info(f"[AutoDiary] 已删除 1 篇日记（id={payload['id']}）")
+                return jsonify({"ok": True, "data": {"deleted": len(ids), "ids": ids}})
             if payload.get("all"):
                 ids = self.db.delete_all(self.base_tags)
                 logger.info(f"[AutoDiary] 已清空 {len(ids)} 篇日记（可撤回）")

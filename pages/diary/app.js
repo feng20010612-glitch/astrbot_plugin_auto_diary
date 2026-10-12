@@ -102,26 +102,128 @@ function renderCalendar() {
 
 // ---------------- 正文 ----------------
 
+// 从标签里认出这条日记属于哪条线（会话/平台）
+function sourceOf(tags) {
+  const text = String(tags || "");
+  const sess = text.match(/sess:([^,]+)/);
+  if (sess) {
+    const raw = sess[1].replace(/_/g, ":");
+    const parts = raw.split(":");
+    return parts.length > 2 ? parts.slice(2).join(":").slice(0, 16) : sess[1].slice(0, 16);
+  }
+  const plat = text.match(/plat:([^,]+)/);
+  if (plat) return plat[1];
+  return "";
+}
+
+function entryBlockHtml(entry, index, total) {
+  const who = personaOf(entry.tags);
+  const line = sourceOf(entry.tags);
+  const label = [who, line].filter(Boolean).join(" · ");
+  return `<section class="entry-block">
+    <div class="entry-block-head">
+      <span class="entry-block-label">第 ${index + 1} / ${total} 篇${
+        label ? ` · ${escapeHtml(label)}` : ""
+      }</span>
+      <span class="entry-block-actions">
+        <button class="ghost-btn edit-one" data-i="${index}">编辑</button>
+        <button class="danger-btn del-one" data-i="${index}">删除这篇</button>
+      </span>
+    </div>
+    <div class="entry-text" id="blockText${index}">${escapeHtml(entry.content || "")}</div>
+  </section>`;
+}
+
+function bindBlocks() {
+  document.querySelectorAll(".edit-one").forEach((el) => {
+    el.addEventListener("click", () => startEditOne(Number(el.dataset.i)));
+  });
+  document.querySelectorAll(".del-one").forEach((el) => {
+    el.addEventListener("click", () => deleteOne(Number(el.dataset.i)));
+  });
+}
+
 async function showEntry(iso) {
   state.selected = iso;
   renderCalendar();
   const body = document.getElementById("entryBody");
   body.innerHTML = '<p class="empty">正在读取…</p>';
-  if (editing) setEditMode(false);
+  setEditMode(false);
   try {
-    const entry = await apiGet("entry", { date: iso });
-    currentEntry = entry || null;
-    if (!entry) {
+    const data = (await apiGet("entry", { date: iso })) || {};
+    currentEntries = data.entries || [];
+    currentEntry = currentEntries[0] || null;
+
+    if (!currentEntries.length) {
       setHeader("这一天还没有日记", iso);
       body.innerHTML = '<p class="empty">要等聊完安静下来、我写完才有哦。</p>';
       return;
     }
-    setHeader(entry.title || "（无标题）", entry.date);
-    body.innerHTML = `<div class="entry-text">${escapeHtml(entry.content || "")}</div>`;
+
+    if (currentEntries.length === 1) {
+      const only = currentEntries[0];
+      setHeader(only.title || "（无标题）", only.date);
+      body.innerHTML = `<div class="entry-text">${escapeHtml(only.content || "")}</div>`;
+      return;
+    }
+
+    // 同一天有多条线：全列出来，别让人以为「日记没更新」
+    setHeader(
+      currentEntries[0].title || "（无标题）",
+      `${iso} · 这天的 ${currentEntries.length} 篇`
+    );
+    body.innerHTML = currentEntries
+      .map((entry, i) => entryBlockHtml(entry, i, currentEntries.length))
+      .join("");
+    bindBlocks();
   } catch (e) {
+    currentEntries = [];
     currentEntry = null;
     setHeader("读取失败", "");
     body.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// 多篇时：单独编辑某一篇
+function startEditOne(index) {
+  const entry = currentEntries[index];
+  if (!entry) return;
+  const holder = document.getElementById(`blockText${index}`);
+  if (!holder) return;
+  holder.innerHTML = `<textarea class="edit-area" id="editArea${index}"></textarea>
+    <div class="inline-actions">
+      <button class="ghost-btn primary" id="saveOne${index}">保存</button>
+      <button class="ghost-btn" id="cancelOne${index}">取消</button>
+    </div>`;
+  document.getElementById(`editArea${index}`).value = entry.content || "";
+  document.getElementById(`editArea${index}`).focus();
+  document.getElementById(`saveOne${index}`).addEventListener("click", async () => {
+    try {
+      await apiPost("update", { id: entry.id, content: document.getElementById(`editArea${index}`).value });
+      await showEntry(state.selected);
+    } catch (e) {
+      await notify(`保存失败：${e.message}`, "出错了");
+    }
+  });
+  document.getElementById(`cancelOne${index}`).addEventListener("click", () => {
+    showEntry(state.selected);
+  });
+}
+
+async function deleteOne(index) {
+  const entry = currentEntries[index];
+  if (!entry) return;
+  const ok = await askConfirm("确定删除这一篇吗？之后可以去回收站找回来。", {
+    title: "删除这篇",
+    okText: "删除",
+  });
+  if (!ok) return;
+  try {
+    await apiPost("delete", { id: entry.id });
+    await refreshAll();
+    await showEntry(state.selected);
+  } catch (e) {
+    await notify(`删除失败：${e.message}`, "出错了");
   }
 }
 
@@ -238,7 +340,8 @@ function applyPrefs(prefs) {
 
 // 内存里也留一份：localStorage 被沙箱禁用时，切换项之间不会互相覆盖
 let activePrefs = loadPrefs();
-let currentEntry = null;   // 当前打开的日记
+let currentEntry = null;   // 当天第一篇（单篇时就是它）
+let currentEntries = [];   // 当天全部日记
 let editing = false;
 
 // 存一份到插件目录：换浏览器、刷新页面都还在
