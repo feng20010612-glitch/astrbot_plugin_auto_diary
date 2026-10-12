@@ -1,11 +1,11 @@
 {
   "enabled": {
-    "description": "启用自动日记",
+    "description": "总开关。关掉之后不再记录，已有日记仍然保留。",
     "type": "bool",
     "default": true
   },
   "scope": {
-    "description": "记录范围",
+    "description": "记录哪些对话。群聊内容通常比较杂，默认只记私聊。",
     "type": "string",
     "options": [
       "private",
@@ -18,7 +18,7 @@
     "default": "private"
   },
   "mode": {
-    "description": "日记写法",
+    "description": "日记怎么写。追加分段 = 每次攒下的对话单独成一段，前面带时间戳，内容一条不丢；整合成一篇 = 每次把当天已有的内容连同新对话一起交给模型，重写成一篇连贯的日记（读起来更顺，但旧内容会被改写）。",
     "type": "string",
     "options": [
       "append",
@@ -63,22 +63,22 @@
     "default": "30"
   },
   "idle_minutes": {
-    "description": "对话安静多少分钟后开始整理（分钟）。太短会把没聊完的话切成好几段。",
+    "description": "对话安静多少分钟后开始整理（分钟）。设得太短，话还没聊完就会被切成好几段；设得太长，日记会来得比较慢。",
     "type": "int",
     "default": 10
   },
   "persona": {
-    "description": "写日记时给模型的人设提示词。留空 = 自动沿用机器人当前的人设（推荐）；不同人设写的日记会分开保存。",
+    "description": "写日记时用谁的口吻。留空 = 自动沿用机器人当前人设（推荐），日记的口吻和称呼都会跟着人设走；填了就固定用这里写的内容。",
     "type": "string",
     "default": ""
   },
   "title_template": {
-    "description": "日记标题模板。{date} = 月-日，{persona} = 当前人设名（换人设后能靠它区分）",
+    "description": "日记标题怎么起。{date} = 月-日（如 10-12），{persona} = 当前人设名。分组打开时同一天会有多篇，标题一样也没关系，页面上会标明是哪条线。",
     "type": "string",
     "default": "{persona}的日记本 · {date}"
   },
   "db_path": {
-    "description": "日记数据库路径（SQLite）。留空 = 放在插件自己的数据目录里，推荐保持默认。",
+    "description": "日记数据库（SQLite）的路径。留空 = 放在插件自己的数据目录，建议保持默认。",
     "type": "string",
     "default": ""
   }
