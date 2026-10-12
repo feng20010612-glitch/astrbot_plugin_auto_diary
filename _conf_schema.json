@@ -1,0 +1,85 @@
+{
+  "enabled": {
+    "description": "启用自动日记",
+    "type": "bool",
+    "default": true
+  },
+  "scope": {
+    "description": "记录范围",
+    "type": "string",
+    "options": [
+      "private",
+      "all"
+    ],
+    "labels": [
+      "只记私聊",
+      "私聊和群聊都记"
+    ],
+    "default": "private"
+  },
+  "mode": {
+    "description": "日记写法",
+    "type": "string",
+    "options": [
+      "append",
+      "merge"
+    ],
+    "labels": [
+      "追加分段（每段带时间戳，一条不丢）",
+      "整合成一篇（交给模型重写，读起来更连贯）"
+    ],
+    "default": "append"
+  },
+  "group_by": {
+    "description": "日记分组方式。不区分 = 所有对话合成一篇；按平台 = QQ / 网页 …各写各的；按会话 = 每个私聊、每个群各自一条日记线。",
+    "type": "string",
+    "options": [
+      "none",
+      "platform",
+      "session"
+    ],
+    "labels": [
+      "不区分（全部合成一篇）",
+      "按平台区分",
+      "按会话区分（最细）"
+    ],
+    "default": "none"
+  },
+  "trash_days": {
+    "description": "回收站保留天数，超过就自动彻底删除。选「永久保留」则一直留着。",
+    "type": "string",
+    "options": [
+      "7",
+      "30",
+      "90",
+      "0"
+    ],
+    "labels": [
+      "保留 7 天",
+      "保留 30 天",
+      "保留 90 天",
+      "永久保留"
+    ],
+    "default": "30"
+  },
+  "idle_minutes": {
+    "description": "对话安静多少分钟后开始整理（分钟）。太短会把没聊完的话切成好几段。",
+    "type": "int",
+    "default": 10
+  },
+  "persona": {
+    "description": "写日记时给模型的人设提示词。留空 = 自动沿用机器人当前的人设（推荐）；不同人设写的日记会分开保存。",
+    "type": "string",
+    "default": ""
+  },
+  "title_template": {
+    "description": "日记标题模板。{date} = 月-日，{persona} = 当前人设名（换人设后能靠它区分）",
+    "type": "string",
+    "default": "{persona}的日记本 · {date}"
+  },
+  "db_path": {
+    "description": "日记数据库路径（SQLite）。留空 = 放在插件自己的数据目录里，推荐保持默认。",
+    "type": "string",
+    "default": ""
+  }
+}

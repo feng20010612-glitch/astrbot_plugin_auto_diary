@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+backups/
+*.bak
+*.db
+*.sqlite*
+prefs.json
+debug.log
+.vscode/
+.idea/
+.DS_Store
