@@ -370,3 +370,24 @@ body {
 .entry-block-actions .ghost-btn,
 .entry-block-actions .danger-btn { height: 28px; padding: 0 10px; font-size: 11px; }
 .inline-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* ---------------- 同一天多篇：篇列表 ---------------- */
+
+.day-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.day-item:last-child { border-bottom: none; }
+.day-item:hover { background: var(--hover); }
+.day-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.day-item-line { font-size: 12px; color: var(--accent); font-weight: 700; }
+.day-item-time { font-size: 12px; color: var(--muted); }
+.day-item-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.day-item-snippet { font-size: 12px; color: var(--muted); line-height: 1.7; }

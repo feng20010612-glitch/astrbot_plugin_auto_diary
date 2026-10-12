@@ -102,45 +102,48 @@ function renderCalendar() {
 
 // ---------------- 正文 ----------------
 
+const PLATFORM_LABELS = {
+  webchat: "网页",
+  aiocqhttp: "QQ",
+  qq_official: "QQ官方",
+  telegram: "Telegram",
+  discord: "Discord",
+  lark: "飞书",
+  dingtalk: "钉钉",
+};
+
 // 从标签里认出这条日记属于哪条线（会话/平台）
+// 关键是取「能区分不同会话」的那一段——之前取开头，几条线看着都一样
 function sourceOf(tags) {
   const text = String(tags || "");
   const sess = text.match(/sess:([^,]+)/);
   if (sess) {
-    const raw = sess[1].replace(/_/g, ":");
-    const parts = raw.split(":");
-    return parts.length > 2 ? parts.slice(2).join(":").slice(0, 16) : sess[1].slice(0, 16);
+    const parts = String(sess[1]).split("_").filter(Boolean);
+    const platRaw = parts[0] || "";
+    const plat = PLATFORM_LABELS[platRaw] || platRaw;
+    const tail = parts[parts.length - 1] || "";
+    const short = tail.slice(0, 8);
+    if (short && plat) return `${plat} · ${short}`;
+    if (short) return short;
+    return String(sess[1]).slice(0, 14);
   }
   const plat = text.match(/plat:([^,]+)/);
-  if (plat) return plat[1];
+  if (plat) return PLATFORM_LABELS[plat[1]] || plat[1];
   return "";
 }
 
-function entryBlockHtml(entry, index, total) {
-  const who = personaOf(entry.tags);
-  const line = sourceOf(entry.tags);
-  const label = [who, line].filter(Boolean).join(" · ");
-  return `<section class="entry-block">
-    <div class="entry-block-head">
-      <span class="entry-block-label">第 ${index + 1} / ${total} 篇${
-        label ? ` · ${escapeHtml(label)}` : ""
-      }</span>
-      <span class="entry-block-actions">
-        <button class="ghost-btn edit-one" data-i="${index}">编辑</button>
-        <button class="danger-btn del-one" data-i="${index}">删除这篇</button>
-      </span>
-    </div>
-    <div class="entry-text" id="blockText${index}">${escapeHtml(entry.content || "")}</div>
-  </section>`;
+function timeOf(stamp) {
+  const m = String(stamp || "").match(/(\d{2}:\d{2})/);
+  return m ? m[1] : "";
 }
 
-function bindBlocks() {
-  document.querySelectorAll(".edit-one").forEach((el) => {
-    el.addEventListener("click", () => startEditOne(Number(el.dataset.i)));
-  });
-  document.querySelectorAll(".del-one").forEach((el) => {
-    el.addEventListener("click", () => deleteOne(Number(el.dataset.i)));
-  });
+function lineLabel(entry) {
+  return [personaOf(entry.tags), sourceOf(entry.tags)].filter(Boolean).join(" · ");
+}
+
+function setBackVisible(on) {
+  const btn = document.getElementById("backToListBtn");
+  if (btn) btn.style.display = on ? "" : "none";
 }
 
 async function showEntry(iso) {
@@ -149,6 +152,7 @@ async function showEntry(iso) {
   const body = document.getElementById("entryBody");
   body.innerHTML = '<p class="empty">正在读取…</p>';
   setEditMode(false);
+  setBackVisible(false);
   try {
     const data = (await apiGet("entry", { date: iso })) || {};
     currentEntries = data.entries || [];
@@ -159,23 +163,11 @@ async function showEntry(iso) {
       body.innerHTML = '<p class="empty">要等聊完安静下来、我写完才有哦。</p>';
       return;
     }
-
     if (currentEntries.length === 1) {
-      const only = currentEntries[0];
-      setHeader(only.title || "（无标题）", only.date);
-      body.innerHTML = `<div class="entry-text">${escapeHtml(only.content || "")}</div>`;
+      showOneEntry(0);
       return;
     }
-
-    // 同一天有多条线：全列出来，别让人以为「日记没更新」
-    setHeader(
-      currentEntries[0].title || "（无标题）",
-      `${iso} · 这天的 ${currentEntries.length} 篇`
-    );
-    body.innerHTML = currentEntries
-      .map((entry, i) => entryBlockHtml(entry, i, currentEntries.length))
-      .join("");
-    bindBlocks();
+    showDayList(iso);
   } catch (e) {
     currentEntries = [];
     currentEntry = null;
@@ -184,49 +176,46 @@ async function showEntry(iso) {
   }
 }
 
+// 这天有好几篇：先列出来，点哪篇看哪篇
+function showDayList(iso) {
+  const body = document.getElementById("entryBody");
+  const day = iso || currentEntries[0].date;
+  setHeader(`${day} 的日记`, `共 ${currentEntries.length} 篇`);
+  setBackVisible(false);
+  body.innerHTML = currentEntries
+    .map((entry, i) => {
+      const line = lineLabel(entry);
+      const snippet = String(entry.content || "").replace(/\s+/g, " ").slice(0, 56);
+      return `<div class="day-item" data-i="${i}">
+        <div class="day-item-head">
+          <span class="day-item-line">${escapeHtml(line || "默认")}</span>
+          <span class="day-item-time">${escapeHtml(timeOf(entry.updated_at))}</span>
+        </div>
+        <div class="day-item-title">${escapeHtml(entry.title || "（无标题）")}</div>
+        <div class="day-item-snippet">${escapeHtml(snippet)}…</div>
+      </div>`;
+    })
+    .join("");
+  body.querySelectorAll(".day-item").forEach((el) => {
+    el.addEventListener("click", () => showOneEntry(Number(el.dataset.i)));
+  });
+}
+
+// 只看某一篇
+function showOneEntry(index) {
+  const entry = currentEntries[index];
+  if (!entry) return;
+  currentEntry = entry;
+  const body = document.getElementById("entryBody");
+  const line = lineLabel(entry);
+  setHeader(entry.title || "（无标题）", [entry.date, line].filter(Boolean).join(" · "));
+  setBackVisible(currentEntries.length > 1);
+  const delBtn = document.getElementById("deleteDayBtn");
+  if (delBtn) delBtn.textContent = currentEntries.length > 1 ? "删除这篇" : "删除这天";
+  body.innerHTML = `<div class="entry-text">${escapeHtml(entry.content || "")}</div>`;
+}
+
 // 多篇时：单独编辑某一篇
-function startEditOne(index) {
-  const entry = currentEntries[index];
-  if (!entry) return;
-  const holder = document.getElementById(`blockText${index}`);
-  if (!holder) return;
-  holder.innerHTML = `<textarea class="edit-area" id="editArea${index}"></textarea>
-    <div class="inline-actions">
-      <button class="ghost-btn primary" id="saveOne${index}">保存</button>
-      <button class="ghost-btn" id="cancelOne${index}">取消</button>
-    </div>`;
-  document.getElementById(`editArea${index}`).value = entry.content || "";
-  document.getElementById(`editArea${index}`).focus();
-  document.getElementById(`saveOne${index}`).addEventListener("click", async () => {
-    try {
-      await apiPost("update", { id: entry.id, content: document.getElementById(`editArea${index}`).value });
-      await showEntry(state.selected);
-    } catch (e) {
-      await notify(`保存失败：${e.message}`, "出错了");
-    }
-  });
-  document.getElementById(`cancelOne${index}`).addEventListener("click", () => {
-    showEntry(state.selected);
-  });
-}
-
-async function deleteOne(index) {
-  const entry = currentEntries[index];
-  if (!entry) return;
-  const ok = await askConfirm("确定删除这一篇吗？之后可以去回收站找回来。", {
-    title: "删除这篇",
-    okText: "删除",
-  });
-  if (!ok) return;
-  try {
-    await apiPost("delete", { id: entry.id });
-    await refreshAll();
-    await showEntry(state.selected);
-  } catch (e) {
-    await notify(`删除失败：${e.message}`, "出错了");
-  }
-}
-
 function personaOf(tags) {
   const match = String(tags || "").match(/persona:([^,]+)/);
   return match ? match[1] : "";
@@ -611,19 +600,21 @@ async function refreshAll() {
 async function deleteCurrentDay() {
   const day = state.selected;
   if (!day) return;
-  const ok = await askConfirm(`确定删除 ${day} 的日记吗？`, {
-    title: "删除这天",
-    okText: "删除",
-  });
+  const multiple = currentEntries.length > 1 && currentEntry;
+  const ok = await askConfirm(
+    multiple ? "确定删除这一篇吗？之后可以去回收站找回来。" : `确定删除 ${day} 的日记吗？`,
+    { title: multiple ? "删除这篇" : "删除这天", okText: "删除" }
+  );
   if (!ok) return;
   try {
-    const res = await apiPost("delete", { date: day });
+    const res = await apiPost("delete", multiple ? { id: currentEntry.id } : { date: day });
     const ids = (res && res.ids) || [];
     await refreshAll();
-    setHeader(
-      ids.length ? `已删除 ${day} 的日记（可在回收站恢复）` : "这一天本来就没有日记",
-      day
-    );
+    if (multiple) {
+      await showEntry(day);
+    } else {
+      setHeader(ids.length ? `已删除 ${day} 的日记（可在回收站恢复）` : "这一天本来就没有日记", day);
+    }
   } catch (e) {
     await notify(`删除失败：${e.message}`, "出错了");
   }
@@ -665,6 +656,7 @@ async function init() {
   document.getElementById("recentBtn").addEventListener("click", showRecent);
   document.getElementById("deleteDayBtn").addEventListener("click", deleteCurrentDay);
   document.getElementById("editBtn").addEventListener("click", startEdit);
+  document.getElementById("backToListBtn").addEventListener("click", () => showDayList(state.selected));
   document.getElementById("saveBtn").addEventListener("click", saveEdit);
   document.getElementById("cancelBtn").addEventListener("click", cancelEdit);
   document.getElementById("onThisDayBtn").addEventListener("click", showOnThisDay);
