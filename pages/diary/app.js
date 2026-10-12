@@ -226,7 +226,9 @@ function renderHits(rows, metaBuilder) {
   body.innerHTML = rows
     .map((r) => {
       const who = personaOf(r.tags);
-      return `<div class="hit" data-date="${escapeHtml(r.date)}">
+      return `<div class="hit" data-date="${escapeHtml(r.date)}" data-id="${
+        r.id != null ? escapeHtml(String(r.id)) : ""
+      }">
         <div class="hit-date">${escapeHtml(r.date)}${
           who ? `<span class="hit-who">${escapeHtml(who)}</span>` : ""
         }</div>
@@ -236,7 +238,7 @@ function renderHits(rows, metaBuilder) {
     })
     .join("");
   body.querySelectorAll(".hit").forEach((el) => {
-    el.addEventListener("click", () => jumpTo(el.dataset.date));
+    el.addEventListener("click", () => jumpTo(el.dataset.date, el.dataset.id));
   });
 }
 
@@ -281,13 +283,18 @@ async function showRecent() {
   }
 }
 
-async function jumpTo(iso) {
+async function jumpTo(iso, entryId) {
   const [y, m] = iso.split("-");
   const changed = Number(y) !== state.year || Number(m) !== state.month;
   state.year = Number(y);
   state.month = Number(m);
   if (changed) await loadMonth();
   await showEntry(iso);
+  // 从列表里点进来的，直接展开那一条，而不是停在这天的清单上
+  if (entryId) {
+    const index = currentEntries.findIndex((e) => String(e.id) === String(entryId));
+    if (index >= 0) showOneEntry(index);
+  }
 }
 
 // ---------------- 阅读偏好（字体 / 字号） ----------------
