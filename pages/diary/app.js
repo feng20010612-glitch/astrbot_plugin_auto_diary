@@ -226,12 +226,13 @@ function renderHits(rows, metaBuilder) {
   body.innerHTML = rows
     .map((r) => {
       const who = personaOf(r.tags);
+      const line = sourceOf(r.tags);
       return `<div class="hit" data-date="${escapeHtml(r.date)}" data-id="${
         r.id != null ? escapeHtml(String(r.id)) : ""
       }">
         <div class="hit-date">${escapeHtml(r.date)}${
           who ? `<span class="hit-who">${escapeHtml(who)}</span>` : ""
-        }</div>
+        }${line ? `<span class="hit-line">${escapeHtml(line)}</span>` : ""}</div>
         <div class="hit-title">${escapeHtml(r.title || "（无标题）")}</div>
         <div class="hit-snippet">${escapeHtml(metaBuilder(r))}</div>
       </div>`;
