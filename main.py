@@ -191,12 +191,13 @@ class DiaryDatabase:
             return None
         fixed = [x for x in (tags or []) if not x.startswith(("sess:", "plat:"))]
         clause2, params2 = self._tag_clause(fixed)
-        row = conn.execute(
+        rows = conn.execute(
             "SELECT id FROM entries WHERE date = ? AND deleted = 0 "
-            f"AND {clause2} AND instr(tags, ?) > 0 ORDER BY id LIMIT 1",
+            f"AND {clause2} AND instr(tags, ?) > 0 ORDER BY id",
             [day, *params2, prefix],
-        ).fetchone()
-        return row["id"] if row else None
+        ).fetchall()
+        # 同平台的不同会话前缀是一样的，候选不唯一时宁可不认，别张冠李戴
+        return rows[0]["id"] if len(rows) == 1 else None
 
     def read_today(self, tags) -> str:
         conn = self.connect()
@@ -718,9 +719,9 @@ class Main(Star):
                 persona_name, system_prompt = await self._resolve_persona(umo)
                 tags = self._build_tags(persona_name, key)
                 self._debug(f"落笔 | 线={key} | 人设={persona_name!r} | 标签={tags}")
-                title = self.title_template.format(
-                    date=date.today().strftime("%m-%d"),
-                    persona=persona_name or "AI",
+                title = self._safe_format(
+                    self.title_template,
+                    {"date": date.today().strftime("%m-%d"), "persona": persona_name or "AI"},
                 )
                 existing = self.db.read_today(tags)
                 # append：每次都追加，带时间戳，一条不丢
@@ -824,7 +825,12 @@ class Main(Star):
         这样即使某个版本的人设对象里没有 name 字段，标题里的 {persona} 也不会退化成「AI」。
         """
         if self.persona:
-            return "", self.persona
+            # 口吻固定用自己的，但标题里的 {persona} 还是尽量取真实人设名
+            manager = getattr(self.context, "persona_manager", None)
+            name = ""
+            if manager is not None:
+                name = self._persona_id_from_config(manager, umo or self._last_umo)
+            return name, self.persona
 
         manager = getattr(self.context, "persona_manager", None)
         target_umo = umo or self._last_umo
@@ -894,6 +900,24 @@ class Main(Star):
         return name, DEFAULT_PERSONA
 
     @staticmethod
+    def _safe_persona(name: str) -> str:
+        """人设名要放进标签，逗号和百分号会把它拆坏，换成下划线。"""
+        text = str(name or "").replace(",", "_").replace("%", "_").replace("\n", " ")
+        return text.strip()
+
+    @staticmethod
+    def _safe_format(template: str, values: dict) -> str:
+        """安全套模板：不认识的占位符原样保留，别因为一个 {foo} 整篇写不出来。"""
+        class _Soft(dict):
+            def __missing__(self, key):
+                return "{" + key + "}"
+
+        try:
+            return str(template).format_map(_Soft(values))
+        except Exception:  # noqa: BLE001
+            return str(template)
+
+    @staticmethod
     def _safe_tag(value: str) -> str:
         """把会话标识压成能安全放进标签的样子。
 
@@ -918,8 +942,9 @@ class Main(Star):
     def _build_tags(self, persona_name: str, key: str = "default") -> list[str]:
         """人设 / 平台 / 会话不同，标签就不同 → 同一天可以各写各的。"""
         tags = [DEFAULT_TAG]
-        if persona_name:
-            tags.append(f"{PERSONA_TAG_PREFIX}{persona_name}")
+        safe_name = self._safe_persona(persona_name)
+        if safe_name:
+            tags.append(f"{PERSONA_TAG_PREFIX}{safe_name}")
         if key and key != "default":
             tags.append(key)
         return tags
@@ -1061,6 +1086,10 @@ class Main(Star):
         try:
             path = Path(self.db_path).parent / "debug.log"
             path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > 2 * 1024 * 1024:
+                # 太大了就留后半段，免得无限长
+                kept = path.read_text(encoding="utf-8", errors="ignore")[-500_000:]
+                path.write_text(kept, encoding="utf-8")
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(f"[{datetime.now().strftime('%m-%d %H:%M:%S')}] {message}\n")
         except Exception:  # noqa: BLE001
@@ -1079,16 +1108,17 @@ class Main(Star):
             return 0
         try:
             rows = conn.execute(
-                "SELECT id, date, tags FROM entries WHERE deleted = 0 AND tags LIKE ?",
-                (f"%{DEFAULT_TAG}%",),
+                "SELECT id, date, tags FROM entries WHERE deleted = 0 "
+                "AND instr(',' || tags || ',', ?) > 0",
+                (f",{DEFAULT_TAG},",),
             ).fetchall()
             changed = 0
             for row in rows:
                 match = re.search(f"{PERSONA_TAG_PREFIX}([^,]+)", row["tags"] or "")
                 persona_name = match.group(1) if match else ""
-                title = self.title_template.format(
-                    date=(row["date"] or "")[5:],
-                    persona=persona_name or "AI",
+                title = self._safe_format(
+                    self.title_template,
+                    {"date": (row["date"] or "")[5:], "persona": persona_name or "AI"},
                 )
                 if title:
                     conn.execute(
