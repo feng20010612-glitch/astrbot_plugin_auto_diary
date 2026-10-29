@@ -57,6 +57,7 @@ LIST_LIMIT = 10              # /读日记 最近 列出的条数
 FIRST_PROMPT = """以下是刚刚发生的一段对话。标着「{other_label}」的是正在和你说话的那个人，标着「{self_label}」的是你自己——
 这两个词只是记录用的记号。写到日记里时，请按你自己的身份和你一贯的习惯去称呼他：
 用你平时叫他的那个称呼，别照抄记号，别用「对方」「那人」这类生分说法，也尽量别用「他」「她」「它」这种没温度的代词（实在没有合适的称呼时，「他」也比「它」好）。
+最重要的一点：别用你自己的名字去称呼他——{self_name_hint}那是你，不是他。
 
 {convo}
 
@@ -72,7 +73,7 @@ MERGE_PROMPT = """今天早些时候，你在日记里已经写过这些：
 
 {existing}
 
-后来，又发生了这样一段对话（「{other_label}」是和你说话的人，「{self_label}」是你自己）——照旧用你平时叫他的那个称呼，别用生分的泛称或者「它」：
+后来，又发生了这样一段对话（「{other_label}」是和你说话的人，「{self_label}」是你自己）——照旧用你平时叫他的那个称呼，别用生分的泛称或者「它」，也别用你自己的名字叫他（{self_name_hint}那是你）：
 
 {convo}
 
@@ -728,7 +729,9 @@ class Main(Star):
                     f"本次对话 {len(convo)} 字，开头：{convo[:40]!r}"
                 )
                 if self.mode == "append":
-                    piece = await self._compose(convo, "", system_prompt, umo)
+                    piece = await self._compose(
+                        convo, "", system_prompt, umo, persona_name
+                    )
                     if not piece:
                         self._debug("模型没返回内容，这次不写")
                         return
@@ -749,7 +752,9 @@ class Main(Star):
                         f"{piece[:30]}…"
                     )
                 else:
-                    text = await self._compose(convo, existing, system_prompt, umo)
+                    text = await self._compose(
+                        convo, existing, system_prompt, umo, persona_name
+                    )
                     self._debug(f"模型返回 {len(text or '')} 字")
                     if text:
                         self.db.save_today(text, title, tags)
@@ -919,8 +924,21 @@ class Main(Star):
             tags.append(key)
         return tags
 
+    @staticmethod
+    def _self_name_hint(persona_name: str) -> str:
+        """告诉模型「你自己叫什么」，免得它拿自己的名字去称呼对方。"""
+        name = str(persona_name or "").strip()
+        if not name:
+            return ""
+        return f"你自己叫「{name}」，"
+
     async def _compose(
-        self, convo: str, existing: str, system_prompt: str, umo: str = ""
+        self,
+        convo: str,
+        existing: str,
+        system_prompt: str,
+        umo: str = "",
+        persona_name: str = "",
     ) -> str:
         provider = None
         try:
@@ -944,12 +962,14 @@ class Main(Star):
                 convo=convo,
                 other_label=OTHER_LABEL,
                 self_label=SELF_LABEL,
+                self_name_hint=self._self_name_hint(persona_name),
             )
         else:
             prompt = FIRST_PROMPT.format(
                 convo=convo,
                 other_label=OTHER_LABEL,
                 self_label=SELF_LABEL,
+                self_name_hint=self._self_name_hint(persona_name),
             )
         resp = await provider.text_chat(
             prompt=prompt,
