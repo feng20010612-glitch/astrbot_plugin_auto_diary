@@ -777,12 +777,46 @@ class Main(Star):
             prompt = getattr(persona, "prompt", "") or getattr(persona, "system_prompt", "")
         return str(name or "").strip(), str(prompt or "").strip()
 
+    @staticmethod
+    def _clean_persona_name(value) -> str:
+        """把「没有名字」的几种情况统一成空串。"""
+        name = str(value or "").strip()
+        if not name or name.lower() in {"default", "default_personality", "none", "null"}:
+            return ""
+        return name
+
+    def _persona_id_from_config(self, manager, umo: str) -> str:
+        """从 AstrBot 配置里读出当前会话用的人设名（这通常是最权威的名字）。"""
+        acm = getattr(manager, "acm", None)
+        if acm is None:
+            return ""
+        conf = None
+        try:
+            if umo:
+                conf = acm.get_conf(umo)
+        except Exception:  # noqa: BLE001
+            conf = None
+        if not isinstance(conf, dict):
+            try:
+                conf = acm.get_conf()
+            except Exception:  # noqa: BLE001
+                conf = None
+        if not isinstance(conf, dict):
+            return ""
+        provider = conf.get("provider_settings") or {}
+        if not isinstance(provider, dict):
+            return ""
+        return self._clean_persona_name(provider.get("default_personality"))
+
     async def _resolve_persona(self, umo: str = "") -> tuple[str, str]:
         """返回 (人设名, 系统提示词)。
 
-        优先级：配置的 persona > 机器人当前会话人设 > 通用设定。
-        取人设名会多试几条路：不同 AstrBot 版本、人设存放位置不一样，
-        只走一条容易失败，标题里的 {persona} 就会退化成「AI」。
+        名字和提示词分开取：
+        - 名字：优先用配置里的 `default_personality`（那是人设的真实名称），
+          其次才用人设对象自带的 name。
+        - 提示词：按名字查人设，查不到再走官方接口、最后遍历人设列表。
+
+        这样即使某个版本的人设对象里没有 name 字段，标题里的 {persona} 也不会退化成「AI」。
         """
         if self.persona:
             return "", self.persona
@@ -797,38 +831,43 @@ class Main(Star):
         base = ""
         tried = []
 
-        # 1) 官方接口：带会话
-        if target_umo:
+        # 1) 配置里的 default_personality —— 名字最可靠
+        config_name = self._persona_id_from_config(manager, target_umo)
+        if config_name:
+            name = config_name
+            tried.append(f"配置名={config_name!r}")
+            try:
+                persona = manager.get_persona_v3_by_id(config_name)
+                _, base = self._pick_persona_fields(persona)
+                tried.append(f"按名字查人设 len={len(base)}")
+            except Exception as exc:  # noqa: BLE001
+                tried.append(f"按名字查失败：{exc!r}")
+        else:
+            tried.append("配置里没有 default_personality")
+
+        # 2) 官方接口（带会话）
+        if not base and target_umo:
             try:
                 persona = await manager.get_default_persona_v3(target_umo)
-                name, base = self._pick_persona_fields(persona)
-                tried.append(f"带会话 -> name={name!r} len={len(base)}")
+                api_name, base = self._pick_persona_fields(persona)
+                if not name:
+                    name = self._clean_persona_name(api_name)
+                tried.append(f"带会话 -> name={api_name!r} len={len(base)}")
             except Exception as exc:  # noqa: BLE001
                 tried.append(f"带会话失败：{exc!r}")
 
-        # 2) 官方接口：不带会话
+        # 3) 官方接口（不带会话）
         if not base:
             try:
                 persona = await manager.get_default_persona_v3()
-                name, base = self._pick_persona_fields(persona)
-                tried.append(f"不带会话 -> name={name!r} len={len(base)}")
+                api_name, base = self._pick_persona_fields(persona)
+                if not name:
+                    name = self._clean_persona_name(api_name)
+                tried.append(f"不带会话 -> name={api_name!r} len={len(base)}")
             except Exception as exc:  # noqa: BLE001
                 tried.append(f"不带会话失败：{exc!r}")
 
-        # 3) 从全局配置里拿 default_personality，再按 id 找人设
-        if not base:
-            try:
-                cfg = manager.acm.get_conf(target_umo) if target_umo else manager.acm.get_conf()
-                persona_id = (cfg or {}).get("provider_settings", {}).get(
-                    "default_personality"
-                )
-                tried.append(f"配置里的 default_personality={persona_id!r}")
-                persona = manager.get_persona_v3_by_id(persona_id)
-                name, base = self._pick_persona_fields(persona)
-            except Exception as exc:  # noqa: BLE001
-                tried.append(f"读配置失败：{exc!r}")
-
-        # 4) 还不行，就在人设列表里挑第一个有内容的
+        # 4) 遍历人设列表
         if not base:
             try:
                 pool = list(getattr(manager, "personas_v3", []) or [])
@@ -836,16 +875,18 @@ class Main(Star):
                 for item in pool:
                     item_name, item_prompt = self._pick_persona_fields(item)
                     if item_prompt:
-                        name, base = item_name, item_prompt
+                        base = item_prompt
+                        if not name:
+                            name = self._clean_persona_name(item_name)
                         break
             except Exception as exc:  # noqa: BLE001
                 tried.append(f"遍历人设失败：{exc!r}")
 
-        self._debug("人设解析 | " + " | ".join(tried))
+        self._debug(f"人设解析 | 名字={name!r} | " + " | ".join(tried))
 
         if base:
             return name, f"{base}\n\n{DIARY_HINT}"
-        return "", DEFAULT_PERSONA
+        return name, DEFAULT_PERSONA
 
     @staticmethod
     def _safe_tag(value: str) -> str:
