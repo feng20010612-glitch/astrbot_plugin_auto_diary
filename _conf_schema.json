@@ -1,0 +1,100 @@
+{
+  "enabled": {
+    "description": "启用自动日记",
+    "hint": "关掉之后不再记录新内容，已有的日记仍然保留。",
+    "type": "bool",
+    "default": true
+  },
+  "scope": {
+    "description": "记录范围",
+    "hint": "群聊内容通常比较杂，建议只记私聊。",
+    "type": "string",
+    "options": [
+      "private",
+      "all"
+    ],
+    "labels": [
+      "只记私聊",
+      "私聊和群聊都记"
+    ],
+    "default": "private"
+  },
+  "idle_minutes": {
+    "description": "安静时长（分钟）",
+    "hint": "聊完安静这么久才开始写。太短会把没聊完的话切成好几段，太长则来得慢，推荐 5~30。",
+    "type": "int",
+    "default": 10
+  },
+  "mode": {
+    "description": "日记写法",
+    "hint": "**追加分段**：每次单独成段，前面带时间戳（〔10:53〕…〔12:10〕…），一条不丢。\n**整合成一篇**：每次把当天内容和新对话交给模型重写成一整篇，读起来更顺，但旧内容会被改写。",
+    "type": "string",
+    "options": [
+      "append",
+      "merge"
+    ],
+    "labels": [
+      "追加分段（带时间戳）",
+      "整合成一篇（会重写）"
+    ],
+    "default": "append"
+  },
+  "group_by": {
+    "description": "分组方式",
+    "hint": "决定「哪些对话算同一条日记线」：\n**不区分** = 一天一篇；**按平台** = QQ、网页各一篇；**按会话** = 每个私聊、每个群各一条。",
+    "type": "string",
+    "options": [
+      "none",
+      "platform",
+      "session"
+    ],
+    "labels": [
+      "不区分（一天一篇）",
+      "按平台分开",
+      "按会话分开"
+    ],
+    "default": "none"
+  },
+  "title_template": {
+    "description": "标题模板",
+    "hint": "`{date}` 换成月-日（如 10-12），`{persona}` 换成人设名。",
+    "type": "string",
+    "default": "{persona}的日记本 · {date}"
+  },
+  "persona": {
+    "description": "写日记的口吻",
+    "hint": "留空就自动沿用机器人当前人设（推荐），称呼和语气都会跟着人设走；填了就固定用这里的内容。",
+    "type": "string",
+    "default": ""
+  },
+  "other_address": {
+    "description": "日记里怎么称呼对方",
+    "hint": "留空由模型按人设自行判断；填了就会强制用这个词（比如「老师」），不再用「他」代替。",
+    "type": "string",
+    "default": ""
+  },
+  "trash_days": {
+    "description": "回收站保留天数",
+    "hint": "超过这个天数会自动彻底删除，删了就找不回来。",
+    "type": "string",
+    "options": [
+      "7",
+      "30",
+      "90",
+      "0"
+    ],
+    "labels": [
+      "7 天",
+      "30 天",
+      "90 天",
+      "永久保留"
+    ],
+    "default": "30"
+  },
+  "db_path": {
+    "description": "数据库路径（进阶）",
+    "hint": "留空就放在插件自己的数据目录，一般不用改。",
+    "type": "string",
+    "default": ""
+  }
+}
