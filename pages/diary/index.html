@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>自动日记本</title>
+<link rel="stylesheet" href="./styles.css?v=1.10.12">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>自动日记本</h1>
+      <p>记录每一天</p>
+    </div>
+
+    <div class="search-box">
+      <input id="searchInput" type="search" placeholder="搜索日记…" autocomplete="off">
+    </div>
+
+    <div class="side-actions">
+      <button id="todayBtn" class="chip">今天</button>
+      <button id="recentBtn" class="chip">最近</button>
+    </div>
+
+    <div class="side-actions">
+      <button id="onThisDayBtn" class="chip">那年今日</button>
+      <button id="trashBtn" class="chip">回收站</button>
+    </div>
+
+    <div class="side-actions">
+      <button id="exportBtn" class="chip">导出</button>
+      <select id="exportFormat" class="select mini" title="导出格式">
+        <option value="md">MD</option>
+        <option value="txt">TXT</option>
+        <option value="json">JSON</option>
+      </select>
+    </div>
+
+    <div class="calendar-card">
+      <div class="calendar-head">
+        <button id="prevMonth" class="nav">‹</button>
+        <span id="monthLabel" class="month-label"></span>
+        <button id="nextMonth" class="nav">›</button>
+      </div>
+      <div class="weekdays">
+        <span>一</span><span>二</span><span>三</span><span>四</span>
+        <span>五</span><span>六</span><span>日</span>
+      </div>
+      <div id="calendar" class="calendar"></div>
+    </div>
+
+    <div class="display-settings">
+      <div class="field">
+        <span class="field-label">字体</span>
+        <select id="fontSelect" class="select"></select>
+      </div>
+      <div class="field">
+        <span class="field-label">字号</span>
+        <select id="sizeSelect" class="select"></select>
+      </div>
+    </div>
+
+    <div class="side-divider"></div>
+    <button id="clearAllBtn" class="danger-btn wide">清空全部日记</button>
+
+    <div class="side-foot">
+      <span id="stats" class="stats">加载中…</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="toolbar">
+      <div class="toolbar-head">
+        <span id="entryDate" class="entry-date"></span>
+        <div class="toolbar-actions" id="viewActions">
+          <button id="backToListBtn" class="ghost-btn" style="display:none">← 这天还有别的</button>
+          <button id="editBtn" class="ghost-btn">编辑</button>
+          <button id="deleteDayBtn" class="danger-btn">删除这天</button>
+        </div>
+        <div class="toolbar-actions" id="editActions" style="display:none">
+          <button id="saveBtn" class="ghost-btn primary">保存</button>
+          <button id="cancelBtn" class="ghost-btn">取消</button>
+        </div>
+      </div>
+      <h2 id="entryTitle" class="entry-title">正在打开…</h2>
+    </div>
+    <section class="entry-card">
+      <div id="entryBody" class="entry-body">
+        <p class="empty">从左边日历里挑一天吧。</p>
+      </div>
+    </section>
+  </main>
+
+</div>
+<div class="mask" id="confirmMask">
+  <div class="dialog">
+    <h3 id="confirmTitle">确认操作</h3>
+    <p id="confirmMessage"></p>
+    <div class="dialog-actions">
+      <button id="confirmCancel" class="ghost-btn">取消</button>
+      <button id="confirmOk" class="danger-btn">确定</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./app.js?v=1.10.12"></script>
+</body>
+</html>
