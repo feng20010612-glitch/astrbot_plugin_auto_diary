@@ -51,6 +51,7 @@ MAX_PENDING_ROUNDS = 40      # 内存里最多攒多少轮对话
 MAX_CONVO_CHARS = 1800       # 单次喂给模型的对话字符上限
 MAX_DIARY_CHARS = 1800       # 整合时已有日记的字符上限
 IDLE_CHECK_INTERVAL = 20     # 后台检查间隔（秒）
+MAX_CONTENT_CHARS = 2_000_000  # 手动编辑正文的长度上限
 MAX_REPLY_CHARS = 1500       # 单条回复最多带多少字日记正文
 LIST_LIMIT = 10              # /读日记 最近 列出的条数
 
@@ -379,15 +380,20 @@ class DiaryDatabase:
         finally:
             conn.close()
 
-    def update_entry(self, entry_id: int, content: str) -> int:
-        """按 id 改某篇日记的正文。"""
+    def update_entry(self, entry_id: int, content: str, tags=None) -> int:
+        """按 id 改某篇日记的正文。带了 tags 就只改本插件范围内的记录。"""
         conn = self.connect()
         try:
-            cur = conn.execute(
+            sql = (
                 "UPDATE entries SET content = ?, "
-                "updated_at = datetime('now', 'localtime') WHERE id = ?",
-                (content, entry_id),
+                "updated_at = datetime('now', 'localtime') WHERE id = ?"
             )
+            params = [content, entry_id]
+            if tags:
+                clause, extra = self._tag_clause(tags)
+                sql += f" AND {clause}"
+                params.extend(extra)
+            cur = conn.execute(sql, params)
             conn.commit()
             return cur.rowcount
         finally:
@@ -448,19 +454,23 @@ class DiaryDatabase:
         clause, params = self._tag_clause(tags)
         return self._soft_delete(clause, params)
 
-    def restore(self, ids: list[int]) -> int:
-        """把软删除的日记恢复回来。"""
+    def restore(self, ids: list[int], tags=None) -> int:
+        """把软删除的日记恢复回来（带了 tags 就只恢复本插件范围内的）。"""
         wanted = [int(i) for i in (ids or [])]
         if not wanted:
             return 0
         conn = self.connect()
         try:
-            conn.executemany(
-                "UPDATE entries SET deleted = 0, deleted_at = NULL WHERE id = ?",
-                [(one,) for one in wanted],
-            )
+            placeholders = ",".join("?" for _ in wanted)
+            sql = f"UPDATE entries SET deleted = 0, deleted_at = NULL WHERE id IN ({placeholders})"
+            params = list(wanted)
+            if tags:
+                clause, extra = self._tag_clause(tags)
+                sql += f" AND {clause}"
+                params.extend(extra)
+            cur = conn.execute(sql, params)
             conn.commit()
-            return len(wanted)
+            return cur.rowcount
         finally:
             conn.close()
 
@@ -1283,7 +1293,11 @@ class Main(Star):
             content = payload.get("content")
             if entry_id is None or not isinstance(content, str):
                 return jsonify({"ok": False, "error": "需要 id 和 content"}), 400
-            rows = self.db.update_entry(int(entry_id), content)
+            if len(content) > MAX_CONTENT_CHARS:
+                return jsonify(
+                    {"ok": False, "error": f"正文太长了（上限 {MAX_CONTENT_CHARS} 字）"}
+                ), 400
+            rows = self.db.update_entry(int(entry_id), content, self.base_tags)
             return jsonify({"ok": True, "data": {"updated": rows}})
         except Exception as exc:  # noqa: BLE001
             logger.exception("[AutoDiary] update 接口出错")
@@ -1299,8 +1313,11 @@ class Main(Star):
                 raw = payload.get("ids") or []
                 if isinstance(raw, (str, int)):
                     raw = [raw]
-                ids = [int(i) for i in raw]
-            count = self.db.restore(ids)
+                try:
+                    ids = [int(i) for i in raw]
+                except (TypeError, ValueError):
+                    return jsonify({"ok": False, "error": "ids 里有不是数字的值"}), 400
+            count = self.db.restore(ids, self.base_tags)
             logger.info(f"[AutoDiary] 已恢复 {count} 篇日记")
             return jsonify({"ok": True, "data": {"restored": count}})
         except Exception as exc:  # noqa: BLE001
@@ -1443,7 +1460,10 @@ class Main(Star):
             payload = await self._payload()
             data = self._load_prefs()
             if isinstance(payload.get("font"), str) and payload["font"].strip():
-                data["font"] = payload["font"].strip()
+                font = payload["font"].strip()[:200]
+                # 别让分号、花括号之类的东西跑进样式里
+                if not re.search(r"[;{}<>]", font):
+                    data["font"] = font
             if payload.get("size") is not None:
                 try:
                     data["size"] = max(8, min(48, int(payload["size"])))
@@ -1468,9 +1488,17 @@ class Main(Star):
         if not any(self._queues.values()):
             yield event.plain_result("这段对话还没攒下什么内容。")
             return
+        done = 0
         for key in [k for k, v in self._queues.items() if v]:
-            await self._flush(key)
-        yield event.plain_result("已整理并写入今天的日记。")
+            try:
+                await self._flush(key)
+                done += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[AutoDiary] 手动整理失败：{exc}")
+        if done:
+            yield event.plain_result("已整理并写入今天的日记。")
+        else:
+            yield event.plain_result("这次没整理成功，详情我记在 debug.log 里了。")
 
     @staticmethod
     def _command_arg(event, *names: str) -> str:
