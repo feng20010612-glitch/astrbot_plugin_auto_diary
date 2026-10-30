@@ -812,7 +812,8 @@ class Main(Star):
         provider = conf.get("provider_settings") or {}
         if not isinstance(provider, dict):
             return ""
-        return self._clean_persona_name(provider.get("default_personality"))
+        # 这里是【人设 id】，不是显示名，不要按名字规则过滤
+        return str(provider.get("default_personality") or "").strip()
 
     async def _resolve_persona(self, umo: str = "") -> tuple[str, str]:
         """返回 (人设名, 系统提示词)。
@@ -829,7 +830,14 @@ class Main(Star):
             manager = getattr(self.context, "persona_manager", None)
             name = ""
             if manager is not None:
-                name = self._persona_id_from_config(manager, umo or self._last_umo)
+                pid = self._persona_id_from_config(manager, umo or self._last_umo)
+                if pid:
+                    try:
+                        obj = manager.get_persona_v3_by_id(pid)
+                        p_name, _ = self._pick_persona_fields(obj)
+                        name = self._clean_persona_name(p_name) or self._clean_persona_name(pid)
+                    except Exception:  # noqa: BLE001
+                        name = self._clean_persona_name(pid)
             return name, self.persona
 
         manager = getattr(self.context, "persona_manager", None)
@@ -842,17 +850,17 @@ class Main(Star):
         base = ""
         tried = []
 
-        # 1) 配置里的 default_personality —— 名字最可靠
-        config_name = self._persona_id_from_config(manager, target_umo)
-        if config_name:
-            name = config_name
-            tried.append(f"配置名={config_name!r}")
+        # 1) 配置里的 default_personality 是【人设 id】，显示名在对象的 name 上
+        config_id = self._persona_id_from_config(manager, target_umo)
+        if config_id:
+            tried.append(f"配置里的人设 id={config_id!r}")
             try:
-                persona = manager.get_persona_v3_by_id(config_name)
-                _, base = self._pick_persona_fields(persona)
-                tried.append(f"按名字查人设 len={len(base)}")
+                persona = manager.get_persona_v3_by_id(config_id)
+                p_name, base = self._pick_persona_fields(persona)
+                name = self._clean_persona_name(p_name) or self._clean_persona_name(config_id)
+                tried.append(f"按 id 查 -> name={p_name!r} len={len(base)}")
             except Exception as exc:  # noqa: BLE001
-                tried.append(f"按名字查失败：{exc!r}")
+                tried.append(f"按 id 查失败：{exc!r}")
         else:
             tried.append("配置里没有 default_personality")
 
